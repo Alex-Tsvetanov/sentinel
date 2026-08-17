@@ -1,0 +1,15 @@
+# pdfLaTeX, НЕ XeLaTeX (T2A + tempora). Файлът е от шаблона; добавен е само
+# редът с BIBINPUTS по-долу.
+$pdf_mode = 1;
+$bibtex_use = 2;
+$out_dir = 'build';
+$clean_ext = 'bbl nav out snm synctex.gz run.xml';
+
+# BibTeX се стартира в build/ и търси голото име `references.bib` през kpathsea.
+# На тази машина (MiKTeX) търсенето попада на друг, празен references.bib,
+# доставен от пакета feupphdteses, вместо на файла на проекта. Резултатът е
+# коварен: bibtex не връща грешка, отчита „Database file #1: references.bib“
+# и намира нула записи, а литературата излиза празна. Проверено с kpsewhich,
+# не е предположение. Заковаването на BIBINPUTS маха двусмислието.
+my $sep = ($^O =~ /MSWin32|cygwin|msys/) ? ';' : ':';
+$ENV{'BIBINPUTS'} = join($sep, '.', '..', ($ENV{'BIBINPUTS'} // ''));
