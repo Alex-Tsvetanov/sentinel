@@ -1,0 +1,146 @@
+% ============================================================================
+% Bibliography.
+%
+% NB: comments in this file are English on purpose, unlike the rest of docs/.
+% BibTeX 0.99 mis-parses non-ASCII bytes sitting outside an entry: with a
+% Cyrillic header comment it opens the file, reports no error, and then finds
+% zero entries. Measured on this machine, not guessed. Keep this file ASCII.
+%
+% Rule for this file: only sources that have been checked and carry a public
+% identifier (RFC number, standard number, publication number). No invented
+% entries and none written from memory. If the text needs a source that cannot
+% be checked, a \TODO marker goes into the text instead.
+%
+% The subject names ISO, ITU, ETSI, ENISA and NIST publications as its sources.
+% The entries below cover ISO, ITU, ENISA and NIST. The specific ETSI documents
+% that enter the review are added when section 1.1 is filled in; see the \TODO
+% marker there.
+% ============================================================================
+
+@techreport{rfc8446,
+  author      = {E. Rescorla},
+  title       = {The Transport Layer Security (TLS) Protocol Version 1.3},
+  institution = {Internet Engineering Task Force},
+  type        = {RFC},
+  number      = {8446},
+  year        = {2018},
+  month       = {August},
+  url         = {https://www.rfc-editor.org/info/rfc8446}
+}
+
+@techreport{rfc5280,
+  author      = {D. Cooper and S. Santesson and S. Farrell and S. Boeyen and
+                 R. Housley and W. Polk},
+  title       = {Internet X.509 Public Key Infrastructure Certificate and
+                 Certificate Revocation List (CRL) Profile},
+  institution = {Internet Engineering Task Force},
+  type        = {RFC},
+  number      = {5280},
+  year        = {2008},
+  month       = {May},
+  url         = {https://www.rfc-editor.org/info/rfc5280}
+}
+
+@techreport{rfc6960,
+  author      = {S. Santesson and M. Myers and R. Ankney and A. Malpani and
+                 S. Galperin and C. Adams},
+  title       = {X.509 Internet Public Key Infrastructure Online Certificate
+                 Status Protocol -- OCSP},
+  institution = {Internet Engineering Task Force},
+  type        = {RFC},
+  number      = {6960},
+  year        = {2013},
+  month       = {June},
+  url         = {https://www.rfc-editor.org/info/rfc6960}
+}
+
+@techreport{rfc4987,
+  author      = {W. Eddy},
+  title       = {TCP SYN Flooding Attacks and Common Mitigations},
+  institution = {Internet Engineering Task Force},
+  type        = {RFC},
+  number      = {4987},
+  year        = {2007},
+  month       = {August},
+  url         = {https://www.rfc-editor.org/info/rfc4987}
+}
+
+@techreport{rfc4033,
+  author      = {R. Arends and R. Austein and M. Larson and D. Massey and S. Rose},
+  title       = {DNS Security Introduction and Requirements},
+  institution = {Internet Engineering Task Force},
+  type        = {RFC},
+  number      = {4033},
+  year        = {2005},
+  month       = {March},
+  url         = {https://www.rfc-editor.org/info/rfc4033}
+}
+
+@techreport{rfc9001,
+  author      = {M. Thomson and S. Turner},
+  title       = {Using TLS to Secure QUIC},
+  institution = {Internet Engineering Task Force},
+  type        = {RFC},
+  number      = {9001},
+  year        = {2021},
+  month       = {May},
+  url         = {https://www.rfc-editor.org/info/rfc9001}
+}
+
+@techreport{nist80052r2,
+  author      = {K. McKay and D. Cooper},
+  title       = {Guidelines for the Selection, Configuration, and Use of
+                 Transport Layer Security (TLS) Implementations},
+  institution = {National Institute of Standards and Technology},
+  type        = {NIST Special Publication},
+  number      = {800-52 Rev. 2},
+  year        = {2019},
+  month       = {August},
+  url         = {https://doi.org/10.6028/NIST.SP.800-52r2}
+}
+
+@techreport{nist80041r1,
+  author      = {K. Scarfone and P. Hoffman},
+  title       = {Guidelines on Firewalls and Firewall Policy},
+  institution = {National Institute of Standards and Technology},
+  type        = {NIST Special Publication},
+  number      = {800-41 Rev. 1},
+  year        = {2009},
+  month       = {September},
+  url         = {https://doi.org/10.6028/NIST.SP.800-41r1}
+}
+
+@manual{iso27033_1,
+  title        = {ISO/IEC 27033-1:2015 Information technology -- Security
+                  techniques -- Network security -- Part 1: Overview and concepts},
+  organization = {International Organization for Standardization},
+  address      = {Geneva},
+  year         = {2015}
+}
+
+@manual{itu_x509,
+  title        = {Recommendation ITU-T X.509: Information technology -- Open
+                  Systems Interconnection -- The Directory: Public-key and
+                  attribute certificate frameworks},
+  organization = {International Telecommunication Union},
+  address      = {Geneva},
+  year         = {2019},
+  month        = {October}
+}
+
+@techreport{enisa_etl2023,
+  author      = {{European Union Agency for Cybersecurity (ENISA)}},
+  title       = {ENISA Threat Landscape 2023},
+  institution = {European Union Agency for Cybersecurity},
+  year        = {2023},
+  month       = {October},
+  url         = {https://www.enisa.europa.eu/publications/enisa-threat-landscape-2023}
+}
+
+@manual{owasp_top10_2021,
+  title        = {OWASP Top 10:2021 -- The Ten Most Critical Web Application
+                  Security Risks},
+  organization = {OWASP Foundation},
+  year         = {2021},
+  url          = {https://owasp.org/Top10/}
+}
