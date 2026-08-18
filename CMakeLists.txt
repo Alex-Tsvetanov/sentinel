@@ -18,6 +18,7 @@ add_library(sentinel_core
     src/tls.cpp
     src/der.cpp
     src/x509.cpp
+    src/chain.cpp
     src/fixtures.cpp
 )
 target_include_directories(sentinel_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -35,6 +36,7 @@ add_executable(sentinel_tests
     tests/test_tls.cpp
     tests/test_der.cpp
     tests/test_x509.cpp
+    tests/test_chain.cpp
 )
 target_link_libraries(sentinel_tests PRIVATE sentinel_core)
 target_include_directories(sentinel_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
