@@ -91,17 +91,49 @@ of each one measurable.
 
 ## Measured results
 
-Taken on this machine with `sentinel_bench --duration-ms 700 --repeat 5`. Medians over five
-repetitions. Numbers on another machine will differ; the commands above reproduce them.
+One run of `sentinel_bench --duration-ms 600 --repeat 11` on an AMD Ryzen 5 3600 (6 cores, 12
+threads) under Windows 11, g++ 15.2.0, Release. Medians over eleven repetitions. The complete
+output of that exact run, every repetition included, is committed as
+[`docs/measurements/bench_run.txt`](docs/measurements/bench_run.txt), so every number below can
+be traced to the values behind it. Another machine will give different numbers; the commands
+above reproduce the method.
 
-| Operation | ns per operation |
-|---|---|
-| TLS 1.3 handshake scan and report, 2448 bytes | see `sentinel_bench` output |
-| X.509 certificate decode, 984 bytes | see `sentinel_bench` output |
-| Certificate path build and validate, three certificates | see `sentinel_bench` output |
+| Operation | ns per operation | per second |
+|---|---:|---:|
+| TLS 1.3 handshake scan and report, 2448 bytes | 7 765 | 128 776 |
+| X.509 certificate decode, 984 bytes | 8 576 | 116 608 |
+| Certificate path build and validate, three certificates | 17 330 | 57 702 |
 
-The report in [`docs/`](docs/) carries the full tables with the individual repetitions behind
-every median. The programs print them; nothing is transcribed here that could drift out of date.
+Cost of one admission decision inside the process, and the same configuration under flood over
+real loopback TCP with two honest clients and four clients that open connections and never
+answer:
+
+| Configuration | ns per decision | admitted/s | vs baseline | p50 µs | peak table | state bytes |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline, no mechanism | 8.7 | 4305 | 100.0% | 454 | 0 | 0 |
+| accounting | 93.9 | 3614 | 83.9% | 525 | 287 | 7552 |
+| accounting + rate limit | 94.9 | 3450 | 80.1% | 516 | 255 | 7912 |
+| accounting + cookie | 124.9 | 1919 | 44.6% | 988 | 48 | 1504 |
+| accounting + cookie + proof of work | 147.8 | 1671 | 38.8% | 1094 | 44 | 1408 |
+| all mechanisms | 136.0 | 1791 | 41.6% | 1027 | 43 | 1384 |
+
+The first row of the decision column exceeded the spread threshold the benchmark applies to
+itself and is printed with that label in the output. The baseline decision path is a few
+nanoseconds long and scheduler jitter on a shared machine is the same size, so it is reported
+for its order of magnitude, not as a precise value.
+
+**What the measurement says.** A decision costs 9 to 148 nanoseconds; an admitted connection
+costs 454 to 1094 *micro*seconds. Four orders of magnitude apart. So the drop to 44.6% of
+baseline throughput with the cookie on does not come from the computation, and the decisions per
+second barely move (12 919 to 11 532). It comes from the extra round trip the mechanism
+requires. What that buys, under the same flood: peak table occupancy falls sixfold and retained
+state fivefold. The mechanisms people call expensive turn out to be expensive in round trips,
+not in CPU.
+
+Proof of work at 12 bits was measured from both sides: 4279 hashes and 0.05 ms for the client to
+find a nonce, one hash and roughly 23 ns for the server to check it.
+
+The report in [`docs/`](docs/) carries the full tables and the reasoning.
 
 ## Architecture
 
