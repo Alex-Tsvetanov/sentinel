@@ -43,6 +43,20 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(sentinel_core PUBLIC Threads::Threads)
 
+add_executable(sentinel_demo apps/demo.cpp)
+target_link_libraries(sentinel_demo PRIVATE sentinel_core)
+
+add_executable(sentinel_bench apps/bench.cpp)
+target_link_libraries(sentinel_bench PRIVATE sentinel_core)
+
+# One command that shows the whole system working.
+add_custom_target(demo
+    COMMAND $<TARGET_FILE:sentinel_demo>
+    DEPENDS sentinel_demo
+    USES_TERMINAL
+    COMMENT "Running the Sentinel demonstration"
+)
+
 enable_testing()
 add_executable(sentinel_tests
     tests/test_main.cpp
