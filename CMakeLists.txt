@@ -15,6 +15,8 @@ endif()
 
 add_library(sentinel_core
     src/siphash.cpp
+    src/tls.cpp
+    src/fixtures.cpp
 )
 target_include_directories(sentinel_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -28,6 +30,7 @@ enable_testing()
 add_executable(sentinel_tests
     tests/test_main.cpp
     tests/test_bytes.cpp
+    tests/test_tls.cpp
 )
 target_link_libraries(sentinel_tests PRIVATE sentinel_core)
 target_include_directories(sentinel_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
