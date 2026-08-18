@@ -45,10 +45,24 @@ double sample_set::highest() const {
     return values.empty() ? 0.0 : *std::max_element(values.begin(), values.end());
 }
 
-double sample_set::relative_spread() const {
+double sample_set::relative_range() const {
     const double m = median();
     if (m == 0.0) return 0.0;
     return (highest() - lowest()) / m;
+}
+
+double sample_set::relative_iqr() const {
+    const double m = median();
+    if (m == 0.0 || values.size() < 4) return relative_range();
+    std::vector<double> v = values;
+    std::sort(v.begin(), v.end());
+    auto quantile = [&v](double q) {
+        const double pos = q * static_cast<double>(v.size() - 1);
+        const std::size_t lo = static_cast<std::size_t>(pos);
+        const std::size_t hi = std::min(lo + 1, v.size() - 1);
+        return v[lo] + (v[hi] - v[lo]) * (pos - static_cast<double>(lo));
+    };
+    return (quantile(0.75) - quantile(0.25)) / m;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +73,14 @@ throughput_row measure_tls_parse(std::int64_t budget_ns, int repetitions) {
     throughput_row row;
     row.name = "TLS 1.3 handshake scan and report";
     const auto stream = fixtures::tls13_stream();
+
+    // Warm up: the first pass pays for page faults, branch predictor training
+    // and the allocator settling on a working set. Timing it would measure the
+    // start of the process rather than the code.
+    for (int i = 0; i < 512; ++i) {
+        auto s = tls::scan_stream(view(stream));
+        if (s) (void)tls::summarise(*s);
+    }
 
     for (int rep = 0; rep < repetitions; ++rep) {
         std::uint64_t ops = 0;
@@ -92,6 +114,8 @@ throughput_row measure_certificate_parse(std::int64_t budget_ns, int repetitions
     row.name = "X.509 certificate decode";
     const auto pki = fixtures::build_pki(1'776'000'000);
     const auto& der = pki.cases[0].der[0];
+
+    for (int i = 0; i < 2048; ++i) (void)x509::parse_certificate(view(der));
 
     for (int rep = 0; rep < repetitions; ++rep) {
         std::uint64_t ops = 0;
@@ -135,6 +159,8 @@ throughput_row measure_chain_validation(std::int64_t budget_ns, int repetitions)
     chain::options opt;
     opt.at_time = reference;
     opt.server_name = c.server_name;
+
+    for (int i = 0; i < 512; ++i) (void)chain::validate(presented, store, opt);
 
     for (int rep = 0; rep < repetitions; ++rep) {
         std::uint64_t ops = 0;
@@ -358,13 +384,14 @@ std::vector<load_row> run_load_sweep(const load_params& p) {
 std::string render_throughput(const std::vector<throughput_row>& rows) {
     std::string out;
     out += "  " + pad("operation", 52) + pad("ns/op", 12, true) + pad("ops/s", 14, true) +
-           pad("spread", 10, true) + "\n";
-    out += "  " + std::string(88, '-') + "\n";
+           pad("iqr", 9, true) + pad("range", 9, true) + "\n";
+    out += "  " + std::string(102, '-') + "\n";
     for (const auto& r : rows) {
         const double ns = r.ns_per_operation.median();
         out += "  " + pad(r.name, 58) + pad(fixed(ns, 1), 12, true) +
                pad(ns > 0 ? fixed(1e9 / ns, 0) : std::string("n/a"), 14, true) +
-               pad(fixed(r.ns_per_operation.relative_spread() * 100.0, 1) + "%", 10, true) + "\n";
+               pad(fixed(r.ns_per_operation.relative_iqr() * 100.0, 1) + "%", 9, true) +
+               pad(fixed(r.ns_per_operation.relative_range() * 100.0, 1) + "%", 9, true) + "\n";
         if (r.mib_per_second > 0) {
             out += "  " + pad("", 58) + pad(fixed(r.mib_per_second, 1) + " MiB/s over " +
                                                 std::to_string(r.bytes) + " bytes",
@@ -378,7 +405,7 @@ std::string render_throughput(const std::vector<throughput_row>& rows) {
 std::string render_decision_costs(const std::vector<decision_cost>& rows) {
     std::string out;
     out += "  " + pad("configuration", 64) + pad("ns/decision", 14, true) +
-           pad("spread", 10, true) + pad("client proof", 16, true) + "\n";
+           pad("iqr", 9, true) + pad("range", 9, true) + pad("client proof", 16, true) + "\n";
     out += "  " + std::string(104, '-') + "\n";
     for (const auto& r : rows) {
         std::string proof = "none";
@@ -387,7 +414,8 @@ std::string render_decision_costs(const std::vector<decision_cost>& rows) {
         }
         out += "  " + pad(r.configuration, 64) +
                pad(fixed(r.ns_per_decision.median(), 1), 14, true) +
-               pad(fixed(r.ns_per_decision.relative_spread() * 100.0, 1) + "%", 10, true) +
+               pad(fixed(r.ns_per_decision.relative_iqr() * 100.0, 1) + "%", 9, true) +
+               pad(fixed(r.ns_per_decision.relative_range() * 100.0, 1) + "%", 9, true) +
                pad(proof, 16, true) + "\n";
         if (r.difficulty_bits > 0) {
             out += "  " + pad("", 64) +

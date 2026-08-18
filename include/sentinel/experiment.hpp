@@ -20,9 +20,14 @@ struct sample_set {
     double median() const;
     double lowest() const;
     double highest() const;
-    // Spread as a fraction of the median, the quantity the validity rule in the
-    // method uses to decide whether a set of repetitions may be reported.
-    double relative_spread() const;
+    // Full range as a fraction of the median. Reported always, because hiding
+    // the worst repetition would be the dishonest way to make a table look calm.
+    double relative_range() const;
+    // Interquartile range as a fraction of the median. This is the quantity the
+    // validity rule uses, because the full range over a handful of repetitions
+    // is decided by a single outlier, and on a general purpose machine an
+    // outlier means the scheduler, not the code.
+    double relative_iqr() const;
 };
 
 struct throughput_row {
