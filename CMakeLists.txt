@@ -21,6 +21,9 @@ add_library(sentinel_core
     src/chain.cpp
     src/admission.cpp
     src/fixtures.cpp
+    src/net.cpp
+    src/harness.cpp
+    src/experiment.cpp
 )
 target_include_directories(sentinel_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -49,6 +52,7 @@ add_executable(sentinel_tests
     tests/test_x509.cpp
     tests/test_chain.cpp
     tests/test_admission.cpp
+    tests/test_net.cpp
 )
 target_link_libraries(sentinel_tests PRIVATE sentinel_core)
 target_include_directories(sentinel_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
