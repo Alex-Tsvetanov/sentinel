@@ -29,6 +29,12 @@
 \DisableLigatures{encoding=*,family=tt*}
 \hyphenpenalty=10000
 \exhyphenpenalty=10000
+% Единичен ред, откъснат от абзаца си в началото или в края на страница, е дефект
+% на пренасянето, не на текста. Наказанията го забраняват структурно, вместо
+% абзацът да бъде преписван заради подредбата на страницата.
+\widowpenalty=10000
+\clubpenalty=10000
+\displaywidowpenalty=10000
 \emergencystretch=1.5em              % цената на justified-без-преноси, вж. Б.4
 \sloppy
 \usepackage{indentfirst}             % отстъп и на ПЪРВИЯ абзац след заглавие, вж. Б.3
@@ -146,8 +152,12 @@
 
 % Italic САМО за ключови понятия (А.4) — семантичен макрос, за да е ревизуемо.
 \newcommand{\term}[1]{\emph{#1}}
-% Инлайн код/идентификатори.
-\DeclareRobustCommand{\code}[1]{\texttt{#1}}
+% Инлайн код/идентификатори. Имената на тестовете в този проект стигат шестдесет
+% знака и нямат къде да се прекъснат: \texttt не пренася, а правилото „без
+% пренасяния“ (А.4) забранява и това. Затова вътре в \code долната черта носи
+% \allowbreak, тоест разрешено, но неотбелязано място за прекъсване. Това е
+% типографска поправка, а не съкращаване на идентификатора.
+\DeclareRobustCommand{\code}[1]{{\ttfamily\renewcommand{\_}{\textunderscore\allowbreak}#1}}
 % Глифи за таблиците с присъди.
 \newcommand{\cmark}{\ensuremath{\checkmark}}
 \newcommand{\xmark}{\ensuremath{\times}}
