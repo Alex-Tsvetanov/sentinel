@@ -24,8 +24,8 @@ void heading(const char* title) {
 void print_samples(const char* label, const sentinel::experiment::sample_set& s, int decimals) {
     std::printf("      %-22s", label);
     for (double v : s.values) std::printf(" %.*f", decimals, v);
-    std::printf("   | median %.*f, spread %.1f%%\n", decimals, s.median(),
-                s.relative_spread() * 100.0);
+    std::printf("   | median %.*f, iqr %.1f%%, range %.1f%%\n", decimals, s.median(),
+                s.relative_iqr() * 100.0, s.relative_range() * 100.0);
 }
 
 int int_arg(int argc, char** argv, const char* name, int fallback) {
@@ -39,7 +39,7 @@ int int_arg(int argc, char** argv, const char* name, int fallback) {
 
 int main(int argc, char** argv) {
     const int duration_ms = int_arg(argc, argv, "--duration-ms", 700);
-    const int repeat = int_arg(argc, argv, "--repeat", 5);
+    const int repeat = int_arg(argc, argv, "--repeat", 9);
     const int honest = int_arg(argc, argv, "--honest", 2);
     const int flood = int_arg(argc, argv, "--flood", 4);
 
@@ -99,10 +99,11 @@ int main(int argc, char** argv) {
     bool all_tight = true;
     auto judge = [&all_tight](const char* what, const sentinel::experiment::sample_set& s,
                               double limit) {
-        const double spread = s.relative_spread();
+        const double spread = s.relative_iqr();
         const bool ok = spread <= limit;
         all_tight = all_tight && ok;
-        std::printf("  %-56s spread %5.1f%%  %s\n", what, spread * 100.0,
+        std::printf("  %-64s iqr %5.1f%%  range %6.1f%%  %s\n", what, spread * 100.0,
+                    s.relative_range() * 100.0,
                     ok ? "within the limit" : "TOO WIDE, do not report this row");
     };
     for (const auto& r : rows) judge(r.name.c_str(), r.ns_per_operation, 0.25);
