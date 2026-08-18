@@ -111,7 +111,7 @@ TEST(harness_a_client_that_never_answers_the_cookie_leaves_no_state_behind) {
     harness::server_options opt;
     opt.admission.cookies = true;
     opt.admission.accounting = true;
-    opt.hold_ns = 60'000'000'000;  // an hour, so nothing expires during the test
+    opt.hold_ns = 60'000'000'000;  // a minute, so nothing expires during the test
     harness::server s(opt);
     REQUIRE(s.start());
 
