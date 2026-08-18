@@ -19,6 +19,7 @@ add_library(sentinel_core
     src/der.cpp
     src/x509.cpp
     src/chain.cpp
+    src/admission.cpp
     src/fixtures.cpp
 )
 target_include_directories(sentinel_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -29,6 +30,16 @@ else()
     target_compile_options(sentinel_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# Sockets. Winsock on Windows, nothing extra on the usual Unixes, and libsocket
+# on the SunOS family. All three ship with the platform.
+if(WIN32)
+    target_link_libraries(sentinel_core PUBLIC ws2_32)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
+    target_link_libraries(sentinel_core PUBLIC socket nsl)
+endif()
+find_package(Threads REQUIRED)
+target_link_libraries(sentinel_core PUBLIC Threads::Threads)
+
 enable_testing()
 add_executable(sentinel_tests
     tests/test_main.cpp
@@ -37,6 +48,7 @@ add_executable(sentinel_tests
     tests/test_der.cpp
     tests/test_x509.cpp
     tests/test_chain.cpp
+    tests/test_admission.cpp
 )
 target_link_libraries(sentinel_tests PRIVATE sentinel_core)
 target_include_directories(sentinel_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
