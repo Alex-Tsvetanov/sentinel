@@ -65,7 +65,7 @@ std::string first_failure(const chain::report& r) {
 // not a numeric discrepancy, so all of them are asserted together.
 TEST(chain_every_generated_case_produces_the_verdict_it_was_built_for) {
     const harness h(reference_time);
-    CHECK(h.pki.cases.size() >= 12);
+    CHECK(h.pki.cases.size() >= 13);
     for (const auto& c : h.pki.cases) {
         const auto rep = h.run(c, reference_time);
         if (rep.accepted != c.expect_accepted) {
@@ -89,21 +89,39 @@ TEST(chain_accepts_a_well_formed_path_and_names_every_certificate_on_it) {
     CHECK(rep.count(chain::status::passed) >= 7);
 }
 
-// The whole point of the report. A check that did not run must say so rather
-// than be counted as a pass.
-TEST(chain_reports_signature_verification_as_skipped_and_says_why) {
+// Signature verification: PASS when a backend is linked and the fixture signed
+// the certificates; SKIP with an explicit reason when it is not.
+TEST(chain_signature_verification_matches_the_compiled_backend) {
     const harness h(reference_time);
     const auto rep = h.run(case_named(h, "well formed chain"), reference_time);
     bool found = false;
     for (const auto& c : rep.checks) {
         if (c.name != "signature verification") continue;
         found = true;
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+        CHECK(c.result == chain::status::passed);
+        CHECK(c.detail.find("2 issuer signature(s) verified") != std::string::npos);
+        CHECK(c.detail.find("OpenSSL") != std::string::npos);
+#else
         CHECK(c.result == chain::status::skipped);
         CHECK(c.detail.find("no cryptographic backend") != std::string::npos);
         CHECK(c.detail.find("2 issuer signature(s)") != std::string::npos);
+#endif
     }
     CHECK(found);
-    CHECK(rep.count(chain::status::skipped) >= 1);
+}
+
+TEST(chain_forged_signature_is_rejected_only_when_a_backend_can_check_it) {
+    const harness h(reference_time);
+    const auto& c = case_named(h, "forged issuer signature");
+    const auto rep = h.run(c, reference_time);
+    CHECK_EQ(rep.accepted, c.expect_accepted);
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+    CHECK(!rep.accepted);
+    CHECK_EQ(first_failure(rep), std::string("signature verification"));
+#else
+    CHECK(rep.accepted);
+#endif
 }
 
 TEST(chain_refuses_an_expired_certificate_and_names_the_check_that_failed) {
@@ -217,7 +235,11 @@ TEST(chain_rendering_lists_the_verdict_the_path_and_every_check) {
     const auto text = chain::render(h.run(case_named(h, "well formed chain"), reference_time));
     CHECK(text.find("ACCEPTED") != std::string::npos);
     CHECK(text.find("[PASS] validity window") != std::string::npos);
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+    CHECK(text.find("[PASS] signature verification") != std::string::npos);
+#else
     CHECK(text.find("[SKIP] signature verification") != std::string::npos);
+#endif
     CHECK(text.find("Sentinel Test Root CA") != std::string::npos);
 }
 

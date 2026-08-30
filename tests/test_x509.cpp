@@ -40,9 +40,15 @@ TEST(x509_decodes_the_fields_of_a_generated_authority_certificate) {
     CHECK(root->usage.has(x509::ku_key_cert_sign));
     CHECK(root->usage.has(x509::ku_crl_sign));
     CHECK(!root->usage.has(x509::ku_digital_signature));
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+    CHECK_EQ(root->signature_algorithm, std::string("ecdsa-with-SHA256"));
+    CHECK_EQ(root->public_key_algorithm, std::string("id-ecPublicKey"));
+#else
     CHECK_EQ(root->signature_algorithm, std::string("sha256WithRSAEncryption"));
     CHECK_EQ(root->public_key_algorithm, std::string("rsaEncryption"));
+#endif
     CHECK(root->tbs.size() > 100);
+    CHECK(!root->public_key_info.empty());
 }
 
 TEST(x509_decodes_alternative_names_key_usage_and_extended_key_usage_of_an_end_entity) {

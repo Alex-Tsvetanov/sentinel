@@ -1,0 +1,34 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  with-openssl:
+    name: cmake + ctest (OpenSSL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libssl-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j $(nproc)
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j1
+
+  without-openssl:
+    name: cmake + ctest (signature SKIP path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libssl-dev
+      - name: Configure without signature verification
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSENTINEL_DISABLE_OPENSSL=ON
+      - name: Build
+        run: cmake --build build -j $(nproc)
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j1

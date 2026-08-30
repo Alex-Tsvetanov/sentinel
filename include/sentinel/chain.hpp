@@ -1,11 +1,10 @@
 // Certificate path building and validation.
 //
-// The algorithm is the one in RFC 5280 section 6, reduced to the checks that can
-// be carried out without a cryptographic backend, plus an explicit statement of
-// the one check that cannot. Signature verification needs a maths library this
-// project deliberately does not depend on, so it is reported as skipped rather
-// than quietly left out. A report that hides a check it did not run is worse
-// than no report.
+// The algorithm is the one in RFC 5280 section 6. Signature verification uses
+// the optional system cryptographic backend (see sentinel/crypto.hpp): when the
+// backend is linked it is performed and reported as passed or failed; when it
+// is absent the check is reported as skipped with the reason. A report that
+// hides a check it did not run is worse than no report.
 #pragma once
 
 #include <cstdint>

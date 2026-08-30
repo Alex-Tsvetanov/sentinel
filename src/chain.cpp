@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 
+#include "sentinel/crypto.hpp"
 #include "sentinel/der.hpp"
 
 namespace sentinel::chain {
@@ -276,13 +277,38 @@ void evaluator::check_revocation(const std::vector<cert_ptr>& path) {
 }
 
 void evaluator::check_signatures(const std::vector<cert_ptr>& path) {
-    // Stated once, plainly. The default build of this project has no third party
-    // dependency at all, and the arithmetic behind a signature check belongs in a
-    // reviewed cryptographic library rather than in a course project.
-    skip("signature verification",
-         "not performed: no cryptographic backend is compiled in, so the " +
-             std::to_string(path.size() - 1) +
-             " issuer signature(s) on this path were not checked");
+    // Trust anchors are trusted by configuration; every certificate below one
+    // must carry a signature that verifies under its issuer's public key.
+    if (path.size() < 2) {
+        skip("signature verification",
+             "path has no issuer signature to check (end entity is a trust anchor)");
+        return;
+    }
+    if (!crypto::available()) {
+        skip("signature verification",
+             "not performed: no cryptographic backend is compiled in, so the " +
+                 std::to_string(path.size() - 1) +
+                 " issuer signature(s) on this path were not checked");
+        return;
+    }
+    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
+        const auto vr = crypto::verify_certificate_signature(*path[i], *path[i + 1]);
+        if (vr.status == crypto::verify_status::skipped) {
+            // available() was true, yet the backend declined this pair: treat as
+            // failure to avoid counting an unchecked link as a pass.
+            fail("signature verification", path[i]->subject.text() + ": " + vr.detail);
+            return;
+        }
+        if (vr.status == crypto::verify_status::failed) {
+            fail("signature verification",
+                 path[i]->subject.text() + " is not signed by " + path[i + 1]->subject.text() +
+                     ": " + vr.detail);
+            return;
+        }
+    }
+    pass("signature verification",
+         std::to_string(path.size() - 1) + " issuer signature(s) verified with " +
+             crypto::backend_name());
 }
 
 void evaluator::run(const std::vector<cert_ptr>& path) {

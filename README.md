@@ -20,8 +20,11 @@ traffic leaves the machine.
 
 ## Build
 
-Nothing but a C++20 compiler and CMake. No package manager, no network access at configure time,
-no optional dependency that the default build needs.
+A C++20 compiler and CMake are enough for the default configuration. Signature
+verification is optional: when CMake finds a system OpenSSL/libcrypto with
+`find_package(OpenSSL QUIET)`, it is linked and issuer signatures are checked.
+When it does not, or when `-DSENTINEL_DISABLE_OPENSSL=ON` is set, that check is
+reported as `SKIP`. Nothing is vendored and nothing is fetched at configure time.
 
 ```bash
 git clone https://github.com/Alex-Tsvetanov/sentinel.git sentinel-network-security
@@ -78,10 +81,15 @@ constraints and `pathLenConstraint`, key usage, extended key usage, host name ma
 RFC 6125 wildcard rules, name constraints, unrecognised critical extensions, and a locally
 administered revocation list with an explicit fail open or fail closed policy.
 
-**Signature verification is not performed, and the report says so.** It is reported as `SKIP` with
-the reason, on every path, next to the checks that did run. The arithmetic belongs in a reviewed
-cryptographic library, and depending on one would break the promise that this repository builds
-with nothing installed. A report that hides a check it did not run is worse than no report.
+**Signature verification** uses the system OpenSSL/libcrypto when CMake finds it.
+Issuer signatures over each TBSCertificate are checked and reported as `PASS` or
+`FAIL`. When no backend is linked, the same check is reported as `SKIP` with the
+reason. The report never pretends a verify call ran when it did not.
+
+**Capture files.** Classic pcap (LINKTYPE_ETHERNET) is parsed in-tree, without
+linking libpcap, enough to recover ordered IPv4/TCP payloads and feed them to the
+TLS reader. Fixtures wrap the project's own generated TLS bytes; there is no
+capture of third-party traffic in the repository.
 
 **Connection admission.** A per-source token bucket, a stateless cookie in the manner of RFC 4987
 so that no state is allocated before a client proves it can receive, a proof of work challenge, a
@@ -95,8 +103,9 @@ One run of `sentinel_bench --duration-ms 600 --repeat 11` on an AMD Ryzen 5 3600
 threads) under Windows 11, g++ 15.2.0, Release. Medians over eleven repetitions. The complete
 output of that exact run, every repetition included, is committed as
 [`docs/measurements/bench_run.txt`](docs/measurements/bench_run.txt), so every number below can
-be traced to the values behind it. Another machine will give different numbers; the commands
-above reproduce the method.
+be traced to the values behind it. That run did not include issuer signature verification; a
+fresh measurement with OpenSSL linked is outstanding. Another machine will give different
+numbers; the commands above reproduce the method.
 
 | Operation | ns per operation | per second |
 |---|---:|---:|
@@ -145,12 +154,15 @@ measurements are reproducible.
 ```mermaid
 flowchart TD
     F[Generated fixture bytes] --> H[TLS 1.3 record and handshake parser]
+    P[Classic pcap file] --> CR[In-tree pcap reader]
+    CR --> H
     B[Any byte buffer] --> H
     H --> R[Negotiated parameter report]
     D[DER encoded certificates] --> X[X.509 decoder]
     X --> V[Chain validator]
     V --> PB[Path building to a trust anchor]
-    V --> CH[RFC 5280 checks, with the skipped ones named]
+    V --> CH[RFC 5280 checks]
+    V --> SIG[Issuer signatures via optional OpenSSL]
     V --> VD[Verdict and per check detail]
     S[Loopback listener] --> A[Admission layer]
     A --> A1[Token bucket per source]
@@ -175,13 +187,13 @@ flowchart TD
 ## Tests
 
 A test runner of about a hundred lines lives in `tests/check.hpp` and `tests/test_main.cpp`.
-There is no GoogleTest and no Catch2, for the same reason there is no OpenSSL: this repository has
-to build on a machine with nothing installed. Every case is registered with CTest individually,
-from a list the test binary emits after it is linked, so the CTest entries cannot drift away from
-the code.
+There is no GoogleTest and no Catch2: the repository must build on a clean machine. OpenSSL is
+detected quietly when present and is not required. Every case is registered with CTest
+individually, from a list the test binary emits after it is linked, so the CTest entries cannot
+drift away from the code.
 
 ```bash
-ctest --test-dir build --output-on-failure   # 82 cases
+ctest --test-dir build --output-on-failure   # 88 cases
 ctest --test-dir build -R chain              # one layer
 ./build/sentinel_tests                       # everything, with per case output
 ```
@@ -211,8 +223,8 @@ be listed with `grep -rn 'TODO' docs/chapters docs/Main.tex`.
 - [x] Token bucket, stateless cookie, proof of work, connection table, degradation policy
 - [x] Loopback load harness and the measurement driver
 - [x] Demonstration and benchmark programs
-- [ ] Signature verification, which needs a cryptographic backend the default build does not have
-- [ ] Reading from a capture file format, which needs a parser for that format
+- [x] Signature verification via system OpenSSL when found; otherwise reported as SKIP
+- [x] Classic pcap reader (in-tree) that extracts TLS record bytes from generated fixtures
 
 ## License
 

@@ -108,8 +108,9 @@ struct certificate {
     std::string subject_key_id_hex;
     std::string authority_key_id_hex;
 
-    bytes_view tbs;        // exact bytes a signature would be computed over
-    bytes_view signature;  // signature value, unused without a crypto backend
+    bytes_view tbs;               // exact bytes a signature is computed over
+    bytes_view signature;         // signatureValue BIT STRING payload
+    bytes_view public_key_info;   // subjectPublicKeyInfo, for the issuer role
 
     bool self_issued() const { return issuer.canonical() == subject.canonical(); }
     std::string summary() const;
