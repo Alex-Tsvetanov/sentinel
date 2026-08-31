@@ -2,15 +2,14 @@
 //
 // Nothing here is captured from a real connection and no real certificate is
 // embedded anywhere in this repository. The TLS byte streams are assembled field
-// by field against RFC 8446, and the certificate hierarchy is encoded field by
-// field against RFC 5280, so both are reproducible from source and can be given
-// deliberate defects one at a time.
+// by field against RFC 8446, the certificate hierarchy is encoded field by field
+// against RFC 5280, and classic pcap files wrap those same bytes in Ethernet /
+// IPv4 / TCP frames the project writes itself.
 //
-// The certificates carry a synthetic public key and a placeholder signature
-// value: no key pair exists and no signature is computed. That is consistent
-// with the validator, which reports signature verification as skipped because
-// the project has no cryptographic backend. Nothing in the system reads the
-// placeholder bytes.
+// When a system OpenSSL/libcrypto was linked at build time, the certificates are
+// signed with keys generated for the fixture so signature verification can run.
+// Without that backend the certificates carry a placeholder signature value and
+// the validator reports the check as skipped. Both behaviours are deliberate.
 #pragma once
 
 #include <cstdint>
@@ -33,6 +32,11 @@ std::vector<std::uint8_t> tls12_downgrade_stream();
 
 // A ClientHello whose extension block claims more bytes than the record holds.
 std::vector<std::uint8_t> truncated_stream();
+
+// Classic pcap (LINKTYPE_ETHERNET) wrapping a TLS byte stream as IPv4/TCP
+// payloads split across one or more frames. Built from the project's own bytes.
+std::vector<std::uint8_t> tls_stream_as_pcap(const std::vector<std::uint8_t>& tls_bytes,
+                                            std::size_t payload_per_frame = 512);
 
 struct chain_case {
     std::string name;

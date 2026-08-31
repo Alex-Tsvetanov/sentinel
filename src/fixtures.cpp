@@ -2,10 +2,20 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <algorithm>
+#include <unordered_map>
 
 #include "sentinel/siphash.hpp"
 #include "sentinel/tls.hpp"
+
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+#include <openssl/evp.h>
+#include <openssl/ec.h>
+#include <openssl/obj_mac.h>
+#include <openssl/x509.h>
+#endif
 
 namespace sentinel::fixtures {
 namespace {
@@ -23,7 +33,23 @@ void put_u16(bytes& b, std::uint16_t v) {
     b.push_back(static_cast<std::uint8_t>(v >> 8));
     b.push_back(static_cast<std::uint8_t>(v));
 }
+void put_u32(bytes& b, std::uint32_t v) {
+    b.push_back(static_cast<std::uint8_t>(v >> 24));
+    b.push_back(static_cast<std::uint8_t>(v >> 16));
+    b.push_back(static_cast<std::uint8_t>(v >> 8));
+    b.push_back(static_cast<std::uint8_t>(v));
+}
 void put(bytes& b, const bytes& v) { b.insert(b.end(), v.begin(), v.end()); }
+void put_le32(bytes& b, std::uint32_t v) {
+    b.push_back(static_cast<std::uint8_t>(v));
+    b.push_back(static_cast<std::uint8_t>(v >> 8));
+    b.push_back(static_cast<std::uint8_t>(v >> 16));
+    b.push_back(static_cast<std::uint8_t>(v >> 24));
+}
+void put_le16(bytes& b, std::uint16_t v) {
+    b.push_back(static_cast<std::uint8_t>(v));
+    b.push_back(static_cast<std::uint8_t>(v >> 8));
+}
 
 bytes u8_prefixed(const bytes& body) {
     bytes out;
@@ -374,8 +400,8 @@ bytes encode_key_usage(std::uint16_t bits) {
     return der_bit_string(payload, unused);
 }
 
-// A SubjectPublicKeyInfo shaped like an RSA key. The modulus is deterministic
-// filler, not a key: no private key exists, nothing signs, nothing verifies.
+// A SubjectPublicKeyInfo shaped like an RSA key. Used only when no OpenSSL
+// backend is linked: the modulus is deterministic filler, not a real key.
 bytes synthetic_spki(const std::string& label) {
     bytes alg = der_oid("1.2.840.113549.1.1.1");
     put(alg, der_null());
@@ -390,6 +416,69 @@ bytes synthetic_spki(const std::string& label) {
     put(spki, der_bit_string(der_seq(key)));
     return der_seq(spki);
 }
+
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+
+struct key_ring {
+    std::unordered_map<std::string, EVP_PKEY*> keys;
+
+    ~key_ring() {
+        for (auto& kv : keys) EVP_PKEY_free(kv.second);
+    }
+
+    // P-256 keygen is fast enough that each CTest process can build a fresh
+    // hierarchy; RSA-2048 was not.
+    EVP_PKEY* get_or_make(const std::string& label) {
+        auto it = keys.find(label);
+        if (it != keys.end()) return it->second;
+        EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
+        if (!ctx) return nullptr;
+        EVP_PKEY* pkey = nullptr;
+        if (EVP_PKEY_keygen_init(ctx) != 1 ||
+            EVP_PKEY_CTX_set_ec_paramgen_curve_nid(ctx, NID_X9_62_prime256v1) != 1 ||
+            EVP_PKEY_keygen(ctx, &pkey) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            return nullptr;
+        }
+        EVP_PKEY_CTX_free(ctx);
+        keys.emplace(label, pkey);
+        return pkey;
+    }
+
+    bytes encode_spki(EVP_PKEY* pkey) const {
+        int len = i2d_PUBKEY(pkey, nullptr);
+        if (len <= 0) return {};
+        bytes out(static_cast<std::size_t>(len));
+        unsigned char* p = out.data();
+        i2d_PUBKEY(pkey, &p);
+        return out;
+    }
+
+    bytes sign_sha256(EVP_PKEY* pkey, bytes_view tbs) const {
+        EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+        if (!ctx) return {};
+        bytes sig;
+        std::size_t siglen = 0;
+        bool ok = EVP_DigestSignInit(ctx, nullptr, EVP_sha256(), nullptr, pkey) == 1 &&
+                  EVP_DigestSign(ctx, nullptr, &siglen, tbs.data(), tbs.size()) == 1;
+        if (ok) {
+            sig.resize(siglen);
+            ok = EVP_DigestSign(ctx, sig.data(), &siglen, tbs.data(), tbs.size()) == 1;
+            if (ok) sig.resize(siglen);
+            else sig.clear();
+        }
+        EVP_MD_CTX_free(ctx);
+        return sig;
+    }
+};
+
+#else
+
+struct key_ring {
+    void* get_or_make(const std::string&) { return nullptr; }
+};
+
+#endif
 
 struct cert_spec {
     std::uint64_t serial = 1;
@@ -407,12 +496,20 @@ struct cert_spec {
     std::vector<std::string> permitted_dns;
     std::vector<std::string> excluded_dns;
     bool unhandled_critical_extension = false;
+    bool forge_signature = false;  // flip a signature byte after signing
 };
 
-bytes encode_certificate(const cert_spec& s) {
-    const bytes sig_alg = [] {
-        bytes a = der_oid("1.2.840.113549.1.1.11");  // sha256WithRSAEncryption
-        put(a, der_null());
+bytes encode_certificate(const cert_spec& s, key_ring& keys) {
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+    const bool live = true;
+#else
+    const bool live = false;
+#endif
+    // Live builds sign with ECDSA P-256; the no-backend build keeps the RSA
+    // algorithm identifier next to the synthetic placeholder key.
+    const bytes sig_alg = [&] {
+        bytes a = der_oid(live ? "1.2.840.10045.4.3.2" : "1.2.840.113549.1.1.11");
+        if (!live) put(a, der_null());
         return der_seq(a);
     }();
 
@@ -427,7 +524,17 @@ bytes encode_certificate(const cert_spec& s) {
         put(tbs, der_seq(v));
     }
     put(tbs, der_name(s.subject));
-    put(tbs, synthetic_spki(s.subject.common_name));
+
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+    EVP_PKEY* subject_key = keys.get_or_make(s.subject.common_name);
+    EVP_PKEY* issuer_key = keys.get_or_make(s.issuer.common_name);
+    bytes spki = (subject_key != nullptr) ? keys.encode_spki(subject_key)
+                                          : synthetic_spki(s.subject.common_name);
+#else
+    (void)keys;
+    bytes spki = synthetic_spki(s.subject.common_name);
+#endif
+    put(tbs, spki);
 
     bytes exts;
     if (s.emit_basic_constraints) {
@@ -466,7 +573,7 @@ bytes encode_certificate(const cert_spec& s) {
     }
     {
         // Subject and authority key identifiers, derived from the names so the
-        // fixture stays deterministic.
+        // fixture stays deterministic in the non-crypto fields.
         put(exts, der_extension("2.5.29.14", false,
                                 der_octet_string(filler("ski " + s.subject.common_name, 20))));
         bytes aki = der_tlv(0x80, filler("ski " + s.issuer.common_name, 20));
@@ -480,14 +587,26 @@ bytes encode_certificate(const cert_spec& s) {
     }
     put(tbs, der_tlv(0xa3, der_seq(exts)));
 
-    bytes cert = der_seq(tbs);
+    const bytes tbs_seq = der_seq(tbs);
+
+    bytes signature_bytes;
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+    if (issuer_key != nullptr) {
+        signature_bytes = keys.sign_sha256(issuer_key, bytes_view(tbs_seq.data(), tbs_seq.size()));
+    }
+#endif
+    if (signature_bytes.empty()) {
+        // Placeholder when no backend signed the TBS. The validator reports
+        // signature verification as skipped in that build configuration.
+        signature_bytes = filler("signature " + s.subject.common_name + std::to_string(s.serial), 256);
+    }
+    if (s.forge_signature && !signature_bytes.empty()) {
+        signature_bytes[0] ^= 0xff;
+    }
+
+    bytes cert = tbs_seq;
     put(cert, sig_alg);
-    // Placeholder in place of a signature. See the header comment: no key
-    // material exists, and the validator reports signature verification as
-    // skipped rather than pretending to have checked this.
-    put(cert, der_bit_string(filler("signature " + s.subject.common_name +
-                                        std::to_string(s.serial),
-                                    256)));
+    put(cert, der_bit_string(signature_bytes));
     return der_seq(cert);
 }
 
@@ -501,10 +620,79 @@ const std::string eku_server_auth = "1.3.6.1.5.5.7.3.1";
 const std::string eku_client_auth = "1.3.6.1.5.5.7.3.2";
 const std::string eku_code_signing = "1.3.6.1.5.5.7.3.3";
 
+#if defined(SENTINEL_HAS_OPENSSL) && SENTINEL_HAS_OPENSSL
+constexpr bool signatures_live = true;
+#else
+constexpr bool signatures_live = false;
+#endif
+
 }  // namespace
+
+std::vector<std::uint8_t> tls_stream_as_pcap(const std::vector<std::uint8_t>& tls_bytes,
+                                            std::size_t payload_per_frame) {
+    if (payload_per_frame == 0) payload_per_frame = 512;
+    bytes out;
+    // Classic pcap global header, little-endian host writing native magic.
+    put_le32(out, 0xa1b2c3d4u);
+    put_le16(out, 2);
+    put_le16(out, 4);
+    put_le32(out, 0);       // thiszone
+    put_le32(out, 0);       // sigfigs
+    put_le32(out, 65535);   // snaplen
+    put_le32(out, 1);       // LINKTYPE_ETHERNET
+
+    std::uint32_t seq = 1;
+    std::uint32_t ts = 1'700'000'000;
+    for (std::size_t off = 0; off < tls_bytes.size(); off += payload_per_frame) {
+        const std::size_t n = std::min(payload_per_frame, tls_bytes.size() - off);
+        bytes frame;
+        // Ethernet: dst, src, IPv4 ethertype.
+        frame.insert(frame.end(), 12, 0x00);
+        put_u16(frame, 0x0800);
+
+        bytes ip_tcp_payload(tls_bytes.begin() + static_cast<std::ptrdiff_t>(off),
+                             tls_bytes.begin() + static_cast<std::ptrdiff_t>(off + n));
+        const std::size_t ip_total = 20 + 20 + ip_tcp_payload.size();
+        bytes ip;
+        put_u8(ip, 0x45);  // v4, IHL 5
+        put_u8(ip, 0);
+        put_u16(ip, static_cast<std::uint16_t>(ip_total));
+        put_u16(ip, static_cast<std::uint16_t>(seq & 0xffff));  // identification
+        put_u16(ip, 0x4000);                                    // DF
+        put_u8(ip, 64);
+        put_u8(ip, 6);  // TCP
+        put_u16(ip, 0); // checksum left zero; the reader does not check it
+        put_u32(ip, 0x7f000001);
+        put_u32(ip, 0x7f000001);
+
+        bytes tcp;
+        put_u16(tcp, 443);
+        put_u16(tcp, 50000);
+        put_u32(tcp, seq);
+        put_u32(tcp, 0);     // ack
+        put_u8(tcp, 0x50);   // data offset 5 (20 bytes)
+        put_u8(tcp, 0x18);   // PSH+ACK
+        put_u16(tcp, 65535);
+        put_u16(tcp, 0);     // checksum
+        put_u16(tcp, 0);     // urgent
+        put(tcp, ip_tcp_payload);
+
+        put(frame, ip);
+        put(frame, tcp);
+
+        put_le32(out, ts++);
+        put_le32(out, 0);
+        put_le32(out, static_cast<std::uint32_t>(frame.size()));
+        put_le32(out, static_cast<std::uint32_t>(frame.size()));
+        put(out, frame);
+        seq += static_cast<std::uint32_t>(n);
+    }
+    return out;
+}
 
 pki build_pki(std::int64_t now) {
     pki out;
+    key_ring keys;
     const dn_spec root_dn{"BG", "Sentinel Course Project", "Sentinel Test Root CA"};
     const dn_spec inter_dn{"BG", "Sentinel Course Project", "Sentinel Test Issuing CA"};
 
@@ -518,7 +706,7 @@ pki build_pki(std::int64_t now) {
     root.has_path_len = true;
     root.path_len = 1;
     root.key_usage_bits = ku_ca;
-    out.root_der = encode_certificate(root);
+    out.root_der = encode_certificate(root, keys);
 
     cert_spec inter;
     inter.serial = 0x10;
@@ -530,7 +718,7 @@ pki build_pki(std::int64_t now) {
     inter.has_path_len = true;
     inter.path_len = 0;
     inter.key_usage_bits = ku_ca;
-    out.intermediate_der = encode_certificate(inter);
+    out.intermediate_der = encode_certificate(inter, keys);
 
     auto server_leaf = [&](std::uint64_t serial, const std::string& cn,
                            const std::vector<std::string>& dns) {
@@ -550,17 +738,20 @@ pki build_pki(std::int64_t now) {
     {
         auto leaf = server_leaf(0x1001, "sentinel.example.test",
                                 {"sentinel.example.test", "*.svc.example.test"});
-        out.cases.push_back({"well formed chain",
-                             "sentinel.example.test",
-                             {encode_certificate(leaf), out.intermediate_der},
-                             true,
-                             "accepted: every check that can run without a cryptographic "
-                             "backend passes"});
+        out.cases.push_back(
+            {"well formed chain",
+             "sentinel.example.test",
+             {encode_certificate(leaf, keys), out.intermediate_der},
+             true,
+             signatures_live
+                 ? "accepted: structural checks and issuer signatures verify"
+                 : "accepted: every check that can run without a cryptographic backend passes; "
+                   "signature verification is reported as skipped"});
     }
     // 2. The wildcard, which must match one label and only one.
     {
         auto leaf = server_leaf(0x1002, "wildcard.example.test", {"*.svc.example.test"});
-        const bytes der = encode_certificate(leaf);
+        const bytes der = encode_certificate(leaf, keys);
         out.cases.push_back({"wildcard matches a single label",
                              "api.svc.example.test",
                              {der, out.intermediate_der},
@@ -579,7 +770,7 @@ pki build_pki(std::int64_t now) {
         leaf.not_after = now - 30 * day;
         out.cases.push_back({"expired end entity certificate",
                              "expired.example.test",
-                             {encode_certificate(leaf), out.intermediate_der},
+                             {encode_certificate(leaf, keys), out.intermediate_der},
                              false,
                              "rejected: the validity window closed before the reference time"});
     }
@@ -588,7 +779,7 @@ pki build_pki(std::int64_t now) {
         auto leaf = server_leaf(0x1004, "other.example.test", {"other.example.test"});
         out.cases.push_back({"host name not covered by the certificate",
                              "sentinel.example.test",
-                             {encode_certificate(leaf), out.intermediate_der},
+                             {encode_certificate(leaf, keys), out.intermediate_der},
                              false,
                              "rejected: no dNSName covers the requested host"});
     }
@@ -606,7 +797,7 @@ pki build_pki(std::int64_t now) {
         leaf.issuer = bad_ca.subject;
         out.cases.push_back({"issuer is not marked as a certification authority",
                              "under-non-ca.example.test",
-                             {encode_certificate(leaf), encode_certificate(bad_ca)},
+                             {encode_certificate(leaf, keys), encode_certificate(bad_ca, keys)},
                              false,
                              "rejected: basicConstraints on the issuer does not say cA"});
     }
@@ -625,7 +816,7 @@ pki build_pki(std::int64_t now) {
         leaf.issuer = sub_dn;
         out.cases.push_back({"path longer than pathLenConstraint allows",
                              "deep.example.test",
-                             {encode_certificate(leaf), encode_certificate(sub),
+                             {encode_certificate(leaf, keys), encode_certificate(sub, keys),
                               out.intermediate_der},
                              false,
                              "rejected: the issuing authority permits no intermediate below it"});
@@ -636,7 +827,7 @@ pki build_pki(std::int64_t now) {
         leaf.eku_oids = {eku_code_signing};
         out.cases.push_back({"extended key usage without server authentication",
                              "codesign.example.test",
-                             {encode_certificate(leaf), out.intermediate_der},
+                             {encode_certificate(leaf, keys), out.intermediate_der},
                              false,
                              "rejected: the key may only be used for code signing"});
     }
@@ -646,7 +837,7 @@ pki build_pki(std::int64_t now) {
         out.revoked_serials.insert("1008");
         out.cases.push_back({"serial number on the local revocation list",
                              "revoked.example.test",
-                             {encode_certificate(leaf), out.intermediate_der},
+                             {encode_certificate(leaf, keys), out.intermediate_der},
                              false,
                              "rejected: the serial number appears on the revocation list"});
     }
@@ -656,7 +847,7 @@ pki build_pki(std::int64_t now) {
         leaf.unhandled_critical_extension = true;
         out.cases.push_back({"unrecognised critical extension",
                              "critical.example.test",
-                             {encode_certificate(leaf), out.intermediate_der},
+                             {encode_certificate(leaf, keys), out.intermediate_der},
                              false,
                              "rejected: RFC 5280 section 6.1 forbids ignoring a critical "
                              "extension that is not understood"});
@@ -675,13 +866,13 @@ pki build_pki(std::int64_t now) {
         nc.path_len = 0;
         nc.key_usage_bits = ku_ca;
         nc.permitted_dns = {"inside.example.test"};
-        const bytes nc_der = encode_certificate(nc);
+        const bytes nc_der = encode_certificate(nc, keys);
 
         auto good = server_leaf(0x100a, "host.inside.example.test", {"host.inside.example.test"});
         good.issuer = nc_dn;
         out.cases.push_back({"name inside the permitted subtree",
                              "host.inside.example.test",
-                             {encode_certificate(good), nc_der},
+                             {encode_certificate(good, keys), nc_der},
                              true,
                              "accepted: the name falls inside the permitted subtree"});
 
@@ -689,7 +880,7 @@ pki build_pki(std::int64_t now) {
         bad.issuer = nc_dn;
         out.cases.push_back({"name outside the permitted subtree",
                              "host.outside.example.test",
-                             {encode_certificate(bad), nc_der},
+                             {encode_certificate(bad, keys), nc_der},
                              false,
                              "rejected: the issuing authority may not certify this name"});
     }
@@ -700,9 +891,24 @@ pki build_pki(std::int64_t now) {
         leaf.issuer = unknown;
         out.cases.push_back({"no path to a trust anchor",
                              "orphan.example.test",
-                             {encode_certificate(leaf)},
+                             {encode_certificate(leaf, keys)},
                              false,
                              "rejected: no certificate presented or trusted issues this one"});
+    }
+    // 12. Forged signature: structural fields are fine, the signature bytes are not.
+    // Without a backend the check is skipped and the path is accepted; with a
+    // backend the path is refused. Both outcomes are written into the case.
+    {
+        auto leaf = server_leaf(0x100d, "forged.example.test", {"forged.example.test"});
+        leaf.forge_signature = true;
+        out.cases.push_back(
+            {"forged issuer signature",
+             "forged.example.test",
+             {encode_certificate(leaf, keys), out.intermediate_der},
+             !signatures_live,
+             signatures_live
+                 ? "rejected: the issuer signature does not verify"
+                 : "accepted with signature verification skipped: no cryptographic backend"});
     }
     return out;
 }

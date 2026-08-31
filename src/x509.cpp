@@ -242,6 +242,7 @@ result<certificate> parse_certificate(bytes_view der_bytes) {
 
     auto spki = t.next(der::tag::sequence);
     if (!spki) return result<certificate>::failure("subjectPublicKeyInfo: " + t.error());
+    c.public_key_info = spki->whole;
     {
         der::reader s{spki->content};
         auto alg = s.next(der::tag::sequence);

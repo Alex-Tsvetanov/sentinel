@@ -81,18 +81,22 @@ void server::stop() {
         if (thread_.joinable()) thread_.join();
         return;
     }
-    // Unblock the accept call by connecting to it once, which is the portable
-    // way to wake a blocking accept without a signal.
-    listener_.close();
+    // Unblock a sleeping accept by connecting once and leaving the socket open
+    // until the accept thread has observed running_ == false. Closing the
+    // listener alone does not wake accept on every kernel this builds on.
+    const std::uint16_t p = listener_.port();
+    auto poke = net::connect_loopback(p);
     if (thread_.joinable()) thread_.join();
+    listener_.close();
+    if (poke) poke->close();
 }
 
 void server::run() {
     std::uint8_t req_buf[request_bytes];
     std::uint8_t rep_buf[reply_bytes];
-    while (running_) {
+    while (true) {
         auto conn = listener_.accept();
-        if (!conn) break;
+        if (!conn || !running_) break;
 
         const std::int64_t at = admission::now_ns();
         // Entries whose dwell time has passed go back before the new decision is

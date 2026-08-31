@@ -19,6 +19,8 @@ add_library(sentinel_core
     src/der.cpp
     src/x509.cpp
     src/chain.cpp
+    src/crypto.cpp
+    src/pcap.cpp
     src/admission.cpp
     src/fixtures.cpp
     src/net.cpp
@@ -43,6 +45,26 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(sentinel_core PUBLIC Threads::Threads)
 
+# Optional signature verification. System OpenSSL/libcrypto only, never vendored.
+# find_package is QUIET so a machine with nothing installed still configures.
+# SENTINEL_DISABLE_OPENSSL forces the SKIP path even when OpenSSL is present,
+# which is how CI proves that path still reports honestly.
+option(SENTINEL_DISABLE_OPENSSL
+       "Compile without signature verification even if OpenSSL is found" OFF)
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND AND NOT SENTINEL_DISABLE_OPENSSL)
+    target_compile_definitions(sentinel_core PUBLIC SENTINEL_HAS_OPENSSL=1)
+    target_link_libraries(sentinel_core PUBLIC OpenSSL::Crypto)
+    message(STATUS "Sentinel: signature verification enabled (${OPENSSL_VERSION})")
+else()
+    target_compile_definitions(sentinel_core PUBLIC SENTINEL_HAS_OPENSSL=0)
+    if(SENTINEL_DISABLE_OPENSSL)
+        message(STATUS "Sentinel: signature verification disabled by SENTINEL_DISABLE_OPENSSL")
+    else()
+        message(STATUS "Sentinel: OpenSSL not found; signature verification will report SKIP")
+    endif()
+endif()
+
 add_executable(sentinel_demo apps/demo.cpp)
 target_link_libraries(sentinel_demo PRIVATE sentinel_core)
 
@@ -65,6 +87,7 @@ add_executable(sentinel_tests
     tests/test_der.cpp
     tests/test_x509.cpp
     tests/test_chain.cpp
+    tests/test_pcap.cpp
     tests/test_admission.cpp
     tests/test_net.cpp
 )
